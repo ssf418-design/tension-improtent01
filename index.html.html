@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>死亡三角力學模擬器 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        input[type=range] { width: 100%; cursor: pointer; }
+        canvas { touch-action: none; border: 2px solid #334155; }
+        .control-panel { background: rgba(255, 255, 255, 0.9); }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-4 flex flex-col items-center">
+
+    <div class="max-w-2xl w-full bg-white rounded-xl shadow-lg p-6 mb-4">
+        <h1 class="text-2xl font-bold text-slate-800 mb-2">死亡三角 (Death Triangle) 進階模擬</h1>
+        <p class="text-slate-500 text-sm mb-4">拖動藍色錨點改變角度，使用滑桿調整參數。</p>
+
+        <!-- 控制區 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 p-4 bg-slate-50 rounded-lg">
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">
+                    負載重量: <span id="val-weight" class="text-blue-600 font-bold">100</span> kg
+                </label>
+                <input type="range" id="input-weight" min="10" max="500" value="100">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">
+                    錨點效率 (摩擦力): <span id="val-efficiency" class="text-blue-600 font-bold">100</span> %
+                </label>
+                <input type="range" id="input-efficiency" min="10" max="100" value="100">
+                <p class="text-xs text-slate-400 mt-1">100%=無摩擦 | 70%=一般轉折</p>
+            </div>
+        </div>
+
+        <!-- 數據顯示 -->
+        <div class="grid grid-cols-3 gap-2 text-center mb-4">
+            <div class="p-2 bg-blue-50 rounded">
+                <div class="text-xs text-slate-500 uppercase">頂角</div>
+                <div id="disp-angle" class="text-lg font-bold">0°</div>
+            </div>
+            <div class="p-2 bg-green-50 rounded">
+                <div class="text-xs text-slate-500 uppercase">繩索張力(y,z)</div>
+                <div id="disp-tension-yz" class="text-lg font-bold">0 kg</div>
+            </div>
+            <div class="p-2 bg-orange-50 rounded">
+                <div class="text-xs text-slate-500 uppercase">繩索張力(x)</div>
+                <div id="disp-tension-x" class="text-lg font-bold">0 kg</div>
+            </div>
+        </div>
+
+        <div class="w-full py-3 px-4 bg-red-50 text-red-700 rounded-lg text-center font-bold mb-4 border border-red-200">
+            錨點 A/B 受力: <span id="disp-resultant" class="text-xl">0</span> kg
+            <div id="warn-msg" class="text-xs mt-1 hidden">⚠️ 警告：錨點負荷已超過總載重！</div>
+        </div>
+
+        <canvas id="canvas" width="600" height="400" class="w-full rounded-lg bg-white shadow-inner"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const inputWeight = document.getElementById('input-weight');
+        const inputEfficiency = document.getElementById('input-efficiency');
+        
+        // 初始狀態
+        let anchors = [
+            { x: 180, y: 100, id: 'A' },
+            { x: 420, y: 100, id: 'B' }
+        ];
+        let weightPos = { x: 300, y: 320 };
+        let draggingIdx = -1;
+        let weight = 100;
+        let efficiency = 1.0;
+
+        // 滑桿監聽
+        inputWeight.oninput = (e) => {
+            weight = parseInt(e.target.value);
+            document.getElementById('val-weight').innerText = weight;
+            update();
+        };
+        inputEfficiency.oninput = (e) => {
+            efficiency = parseInt(e.target.value) / 100;
+            document.getElementById('val-efficiency').innerText = (efficiency * 100).toFixed(0);
+            update();
+        };
+
+        function update() {
+            // 計算幾何
+            const centerX = (anchors[0].x + anchors[1].x) / 2;
+            weightPos.x = centerX; // 保持對稱以簡化教學
+
+            const dx = Math.abs(anchors[1].x - anchors[0].x) / 2;
+            const dy = Math.abs(weightPos.y - anchors[0].y);
+            
+            // 角度 theta 是繩索與垂直線的夾角
+            const thetaRad = Math.atan2(dx, dy);
+            const topAngle = (thetaRad * 2 * 180 / Math.PI);
+
+            // 力學計算
+            // T_y * cos(theta) * 2 = Weight
+            const tensionYZ = weight / (2 * Math.cos(thetaRad));
+            // T_x = T_y * 效率
+            const tensionX = tensionYZ * efficiency;
+
+            // 錨點合力 (向量相加)
+            // 分量法：Ax = Tx + Ty*sin(theta), Ay = Ty*cos(theta)
+            const forceAX = tensionX + (tensionYZ * Math.sin(thetaRad));
+            const forceAY = (tensionYZ * Math.cos(thetaRad));
+            const resultant = Math.sqrt(forceAX * forceAX + forceAY * forceAY);
+
+            // 更新顯示
+            document.getElementById('disp-angle').innerText = topAngle.toFixed(1) + '°';
+            document.getElementById('disp-tension-yz').innerText = tensionYZ.toFixed(1) + ' kg';
+            document.getElementById('disp-tension-x').innerText = tensionX.toFixed(1) + ' kg';
+            document.getElementById('disp-resultant').innerText = resultant.toFixed(1);
+            document.getElementById('warn-msg').classList.toggle('hidden', resultant <= weight);
+
+            draw(topAngle, resultant);
+        }
+
+        function draw(angle, res) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 繪製格線
+            ctx.strokeStyle = '#f1f5f9';
+            ctx.lineWidth = 1;
+            for(let i=0; i<canvas.width; i+=20) {
+                ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke();
+            }
+            for(let i=0; i<canvas.height; i+=20) {
+                ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width,i); ctx.stroke();
+            }
+
+            // 繪製繩索 (死亡三角)
+            ctx.beginPath();
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = angle > 120 ? '#ef4444' : '#22c55e';
+            
+            ctx.moveTo(anchors[0].x, anchors[0].y); // A
+            ctx.lineTo(anchors[1].x, anchors[1].y); // X段 (橫向)
+            ctx.lineTo(weightPos.x, weightPos.y);   // Z段 (右斜)
+            ctx.lineTo(anchors[0].x, anchors[0].y); // Y段 (左斜)
+            ctx.stroke();
+
+            // 繪製錨點
+            anchors.forEach(a => {
+                ctx.fillStyle = '#3b82f6';
+                ctx.beginPath(); ctx.arc(a.x, a.y, 12, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText(a.id, a.x-4, a.y+4);
+            });
+
+            // 繪製重物
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(weightPos.x - 30, weightPos.y, 60, 40);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText(weight + "kg", weightPos.x - 18, weightPos.y + 25);
+            
+            // 繪製向下拉力指示線
+            ctx.setLineDash([5, 5]);
+            ctx.strokeStyle = '#94a3b8';
+            ctx.beginPath(); ctx.moveTo(weightPos.x, weightPos.y); ctx.lineTo(weightPos.x, weightPos.y + 60); ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // 觸控與滑鼠邏輯
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: (clientX - rect.left) * (canvas.width / rect.width),
+                y: (clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
+        const handleStart = (e) => {
+            const pos = getPos(e);
+            anchors.forEach((a, i) => {
+                if(Math.hypot(a.x - pos.x, a.y - pos.y) < 30) draggingIdx = i;
+            });
+        };
+
+        const handleMove = (e) => {
+            if(draggingIdx === -1) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            anchors[draggingIdx].x = Math.max(50, Math.min(canvas.width - 50, pos.x));
+            anchors[draggingIdx].y = Math.max(50, Math.min(200, pos.y));
+            update();
+        };
+
+        const handleEnd = () => draggingIdx = -1;
+
+        canvas.addEventListener('mousedown', handleStart);
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', handleEnd);
+        
+        canvas.addEventListener('touchstart', handleStart);
+        window.addEventListener('touchmove', handleMove, {passive: false});
+        window.addEventListener('touchend', handleEnd);
+
+        // 初始化
+        update();
+    </script>
+</body>
+</html>
